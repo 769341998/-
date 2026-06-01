@@ -112,7 +112,29 @@ jobs:
                 if (userInfo?.id) {
                   console.log(`✅ 用户ID: ${userInfo.id}`);
                 }
+
+                // 查询余额
+                const selfInfo = await page.evaluate(async (userId) => {
+                  try {
+                    const headers = userId ? { 'New-Api-User': String(userId) } : {};
+                    const res = await fetch('/api/user/self', { method: 'GET', headers });
+                    return await res.json();
+                  } catch (e) {
+                    return { error: e.toString() };
+                  }
+                }, userInfo?.id);
+
+                if (selfInfo?.data) {
+                  const quota = selfInfo.data.quota ?? selfInfo.data.balance ?? null;
+                  const used = selfInfo.data.used_quota ?? null;
+                  if (quota !== null) {
+                    const balance = (quota / 500000).toFixed(4);
+                    const usedAmount = used !== null ? (used / 500000).toFixed(4) : '未知';
+                    console.log(`💰 当前余额: $${balance}  |  历史消耗: $${usedAmount}`);
+                  }
+                }
                 
+                // 签到
                 const response = await page.evaluate(async (userId) => {
                   try {
                     const headers = userId ? { 'New-Api-User': String(userId) } : {};
@@ -126,10 +148,10 @@ jobs:
                 const msg = response.message || response.msg || JSON.stringify(response);
                 
                 if (response.success || msg.includes('成功') || msg.includes('已签到')) {
-                  console.log(`✅ ${msg}`);
+                  console.log(`✅ 签到: ${msg}`);
                   success++;
                 } else {
-                  console.log(`❌ ${msg}`);
+                  console.log(`❌ 签到: ${msg}`);
                   failed++;
                 }
                 
