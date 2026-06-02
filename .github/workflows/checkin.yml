@@ -26,31 +26,38 @@ jobs:
       - name: Run Checkin
         env:
           CHECKIN_SITES: ${{ secrets.CHECKIN_SITES }}
-          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: |
           node << 'EOF'
           const { chromium } = require('playwright');
+          const https = require('https');
 
           const SITES = JSON.parse(process.env.CHECKIN_SITES || '[]');
-          const PUSHPLUS_TOKEN = process.env.PUSHPLUS_TOKEN || '';
+          const SERVERCHAN_KEY = process.env.SERVERCHAN_KEY || '';
 
           async function sendNotification(title, content) {
-            if (!PUSHPLUS_TOKEN) return;
-            try {
-              const https = require('https');
-              const data = JSON.stringify({ token: PUSHPLUS_TOKEN, title, content, template: 'html' });
-              const req = https.request({
-                hostname: 'www.pushplus.plus',
-                path: '/api/send',
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-              });
-              req.write(data);
-              req.end();
-              console.log('📨 微信通知已发送');
-            } catch(e) {
-              console.log('📨 通知发送失败:', e.message);
-            }
+            if (!SERVERCHAN_KEY) return;
+            return new Promise((resolve) => {
+              try {
+                const postData = `title=${encodeURIComponent(title)}&desp=${encodeURIComponent(content)}`;
+                const req = https.request({
+                  hostname: 'sctapi.ftqq.com',
+                  path: `/${SERVERCHAN_KEY}.send`,
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Content-Length': Buffer.byteLength(postData)
+                  }
+                }, () => resolve());
+                req.on('error', () => resolve());
+                req.write(postData);
+                req.end();
+                console.log('📨 微信通知已发送');
+              } catch(e) {
+                console.log('📨 通知发送失败:', e.message);
+                resolve();
+              }
+            });
           }
 
           async function checkinSite(browser, site) {
@@ -150,7 +157,7 @@ jobs:
               args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled', '--window-size=1920,1080']
             });
 
-            // 并发执行，每批5个
+            // 并发执行，每批10个
             const results = [];
             const batchSize = 10;
             for (let i = 0; i < SITES.length; i += batchSize) {
@@ -167,13 +174,13 @@ jobs:
 
             // 发送微信通知
             const time = new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'});
-            let content = `<h3>⏰ ${time}</h3><table border="1" cellpadding="5" style="border-collapse:collapse;width:100%"><tr><th>站点</th><th>账号</th><th>签到</th><th>余额</th></tr>`;
+            let content = `## ⏰ ${time}\n\n| 站点 | 账号 | 签到 | 余额 |\n|---|---|---|---|\n`;
             for (const r of results) {
               const icon = r.ok ? '✅' : '❌';
-              content += `<tr><td>${r.name}</td><td>${r.username}</td><td>${icon} ${r.msg}</td><td>${r.balance}</td></tr>`;
+              content += `| ${r.name} | ${r.username} | ${icon} ${r.msg} | ${r.balance} |\n`;
             }
-            content += `</table><p>✅ ${success} 成功 &nbsp; ❌ ${failed} 失败</p>`;
-            await sendNotification('🎯 自动签到报告', content);
+            content += `\n**✅ ${success} 成功 / ❌ ${failed} 失败**`;
+            await sendNotification(`🎯 签到报告 ${success}成功 ${failed}失败`, content);
           }
 
           main().catch(console.error);
