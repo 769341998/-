@@ -84,11 +84,19 @@ jobs:
               const userInput = await page.$('input[placeholder*="邮箱"], input[placeholder*="账号"], input[name="username"]');
               const passInput = await page.$('input[type="password"]');
 
-              if (emailInput) await emailInput.fill(site.username);
-              else if (userInput) await userInput.fill(site.username);
-              if (passInput) await passInput.fill(site.password);
+              if (emailInput) {
+                await emailInput.fill(site.username);
+                await emailInput.press('Tab');
+              } else if (userInput) {
+                await userInput.fill(site.username);
+                await userInput.press('Tab');
+              }
+              if (passInput) {
+                await passInput.fill(site.password);
+                await passInput.press('Tab');
+              }
 
-              await page.waitForTimeout(1000);
+              await page.waitForTimeout(2000);
 
               // 等待登录按钮可点击再点
               try {
