@@ -89,10 +89,16 @@ jobs:
               if (passInput) await passInput.fill(site.password);
 
               await page.waitForTimeout(1000);
-              const submitBtn = await page.$('button[type="submit"]');
-              if (submitBtn) {
+
+              // 等待登录按钮可点击再点
+              try {
+                const submitBtn = await page.waitForSelector('button[type="submit"]:not([disabled])', { timeout: 15000 });
                 await submitBtn.click();
                 console.log('🔄 点击登录...');
+              } catch(e) {
+                const submitBtn = await page.$('button[type="submit"]');
+                if (submitBtn) await submitBtn.click();
+                console.log('🔄 点击登录（强制）...');
               }
 
               await page.waitForTimeout(8000);
