@@ -81,7 +81,7 @@ jobs:
               }
 
               const emailInput = await page.$('input[type="email"]');
-              const userInput = await page.$('input[placeholder*="邮箱"], input[placeholder*="账号"], input[name="username"]');
+              const userInput = await page.$('input[placeholder*="邮箱"], input[placeholder*="账号"], input[placeholder*="用户名"], input[name="username"]');
               const passInput = await page.$('input[type="password"]');
 
               if (emailInput) {
@@ -96,7 +96,21 @@ jobs:
                 await passInput.press('Tab');
               }
 
-              await page.waitForTimeout(2000);
+              await page.waitForTimeout(1000);
+
+              // 勾选用户协议复选框（如果有）
+              try {
+                const checkbox = await page.$('input[type="checkbox"]');
+                if (checkbox) {
+                  const checked = await checkbox.isChecked();
+                  if (!checked) {
+                    await checkbox.click();
+                    console.log('☑️ 已勾选用户协议');
+                  }
+                }
+              } catch(e) {}
+
+              await page.waitForTimeout(1000);
 
               // 等待登录按钮可点击再点
               try {
