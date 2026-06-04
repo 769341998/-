@@ -99,14 +99,20 @@ jobs:
 
               await page.waitForTimeout(1000);
 
-              // 勾选用户协议复选框（如果有）
+              // 勾选用户协议复选框（兼容标准和semi-checkbox）
               try {
-                const checkbox = await page.$('input[type="checkbox"]');
-                if (checkbox) {
-                  const checked = await checkbox.isChecked();
-                  if (!checked) {
-                    await checkbox.click();
-                    console.log('☑️ 已勾选用户协议');
+                const semiCheckbox = await page.$('.semi-checkbox');
+                if (semiCheckbox) {
+                  await semiCheckbox.click();
+                  console.log('☑️ 已勾选用户协议（semi）');
+                } else {
+                  const checkbox = await page.$('input[type="checkbox"]');
+                  if (checkbox) {
+                    const checked = await checkbox.isChecked();
+                    if (!checked) {
+                      await checkbox.click();
+                      console.log('☑️ 已勾选用户协议');
+                    }
                   }
                 }
               } catch(e) {}
