@@ -61,7 +61,7 @@ jobs:
           }
 
           async function checkinSite(browser, site) {
-            console.log(`\n📌 ${site.name}  ${site.url}`);
+            console.log(`\n📌 [${site.name}] ${site.username}`);
             try {
               const context = await browser.newContext({
                 viewport: { width: 1920, height: 1080 },
@@ -84,7 +84,6 @@ jobs:
               const userInput = await page.$('input[placeholder*="邮箱"], input[placeholder*="账号"], input[placeholder*="用户名"], input[name="username"]');
               const passInput = await page.$('input[type="password"]');
 
-              // 模拟真实键盘输入，触发框架事件
               if (emailInput) {
                 await emailInput.click();
                 await emailInput.type(site.username, { delay: 50 });
@@ -139,7 +138,13 @@ jobs:
                 } catch(e) { return null; }
               });
 
-              if (userInfo?.id) console.log(`✅ 用户ID: ${userInfo.id}`);
+              if (!userInfo?.id) {
+                console.log(`❌❌❌ [${site.name}] ${site.username} 登录失败，未获取到用户信息`);
+                await context.close();
+                return { name: site.name, username: site.username, ok: false, msg: '登录失败', balance: '' };
+              }
+
+              console.log(`✅ 用户ID: ${userInfo.id}`);
 
               // 签到
               const response = await page.evaluate(async (userId) => {
@@ -152,7 +157,12 @@ jobs:
 
               const msg = response.message || response.msg || JSON.stringify(response);
               const checkinOk = response.success || msg.includes('成功') || msg.includes('已签到');
-              console.log(checkinOk ? `✅ 签到: ${msg}` : `❌ 签到: ${msg}`);
+
+              if (checkinOk) {
+                console.log(`✅ [${site.name}] ${site.username} 签到: ${msg}`);
+              } else {
+                console.log(`❌❌❌ [${site.name}] ${site.username} 签到失败: ${msg}`);
+              }
 
               // 签到后查询余额
               const selfInfo = await page.evaluate(async (userId) => {
@@ -171,14 +181,14 @@ jobs:
                   const balance = (quota / 500000).toFixed(4);
                   const usedAmount = used !== null ? (used / 500000).toFixed(4) : '未知';
                   balanceStr = `$${balance}`;
-                  console.log(`💰 签到后余额: $${balance}  |  历史消耗: $${usedAmount}`);
+                  console.log(`💰 余额: $${balance}  |  历史消耗: $${usedAmount}`);
                 }
               }
 
               await context.close();
               return { name: site.name, username: site.username, ok: checkinOk, msg, balance: balanceStr };
             } catch(e) {
-              console.log(`❌ 失败: ${e.message}`);
+              console.log(`❌❌❌ [${site.name}] ${site.username} 异常: ${e.message}`);
               return { name: site.name, username: site.username, ok: false, msg: e.message, balance: '' };
             }
           }
@@ -192,7 +202,6 @@ jobs:
               args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled', '--window-size=1920,1080']
             });
 
-            // 并发执行，每批10个
             const results = [];
             const batchSize = 10;
             for (let i = 0; i < SITES.length; i += batchSize) {
@@ -207,6 +216,13 @@ jobs:
             const failed = results.filter(r => !r.ok).length;
             console.log(`\n📊 签到完成: ✅ ${success} 成功, ❌ ${failed} 失败`);
 
+            // 失败列表单独打印
+            const failedList = results.filter(r => !r.ok);
+            if (failedList.length > 0) {
+              console.log('\n❌ 失败账号：');
+              failedList.forEach(r => console.log(`  - [${r.name}] ${r.username}: ${r.msg}`));
+            }
+
             // 发送微信通知
             const time = new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'});
             let content = `## ⏰ ${time}\n\n| 站点 | 账号 | 签到 | 余额 |\n|---|---|---|---|\n`;
@@ -215,6 +231,14 @@ jobs:
               content += `| ${r.name} | ${r.username} | ${icon} ${r.msg} | ${r.balance} |\n`;
             }
             content += `\n**✅ ${success} 成功 / ❌ ${failed} 失败**`;
+
+            if (failedList.length > 0) {
+              content += `\n\n### ❌ 失败账号\n`;
+              failedList.forEach(r => {
+                content += `- [${r.name}] ${r.username}: ${r.msg}\n`;
+              });
+            }
+
             await sendNotification(`🎯 签到报告 ${success}成功 ${failed}失败`, content);
           }
 
