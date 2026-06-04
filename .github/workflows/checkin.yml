@@ -84,16 +84,17 @@ jobs:
               const userInput = await page.$('input[placeholder*="邮箱"], input[placeholder*="账号"], input[placeholder*="用户名"], input[name="username"]');
               const passInput = await page.$('input[type="password"]');
 
+              // 模拟真实键盘输入，触发框架事件
               if (emailInput) {
-                await emailInput.fill(site.username);
-                await emailInput.press('Tab');
+                await emailInput.click();
+                await emailInput.type(site.username, { delay: 50 });
               } else if (userInput) {
-                await userInput.fill(site.username);
-                await userInput.press('Tab');
+                await userInput.click();
+                await userInput.type(site.username, { delay: 50 });
               }
               if (passInput) {
-                await passInput.fill(site.password);
-                await passInput.press('Tab');
+                await passInput.click();
+                await passInput.type(site.password, { delay: 50 });
               }
 
               await page.waitForTimeout(1000);
