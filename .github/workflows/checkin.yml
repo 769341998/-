@@ -85,17 +85,9 @@ jobs:
               const userInput = await page.$('input[placeholder*="邮箱"], input[placeholder*="账号"], input[placeholder*="用户名"], input[name="username"]');
               const passInput = await page.$('input[type="password"]');
 
-              if (emailInput) {
-                await emailInput.click();
-                await emailInput.type(site.username, { delay: 50 });
-              } else if (userInput) {
-                await userInput.click();
-                await userInput.type(site.username, { delay: 50 });
-              }
-              if (passInput) {
-                await passInput.click();
-                await passInput.type(site.password, { delay: 50 });
-              }
+              if (emailInput) await emailInput.fill(site.username);
+              else if (userInput) await userInput.fill(site.username);
+              if (passInput) await passInput.fill(site.password);
 
               await page.waitForTimeout(1000);
 
