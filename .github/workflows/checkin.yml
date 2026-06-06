@@ -29,21 +29,28 @@ jobs:
           CHECKIN_SITES: ${{ secrets.CHECKIN_SITES }}
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: |
-          node << 'EOF'
+          cat << 'SCRIPT' > /tmp/checkin.js
           const { chromium } = require('playwright');
           const https = require('https');
 
           const SITES = JSON.parse(process.env.CHECKIN_SITES || '[]');
           const SERVERCHAN_KEY = process.env.SERVERCHAN_KEY || '';
 
+          function withTimeout(promise, ms) {
+            return Promise.race([
+              promise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error('timeout ' + ms + 'ms')), ms))
+            ]);
+          }
+
           async function sendNotification(title, content) {
             if (!SERVERCHAN_KEY) return;
             return new Promise((resolve) => {
               try {
-                const postData = `title=${encodeURIComponent(title)}&desp=${encodeURIComponent(content)}`;
+                const postData = 'title=' + encodeURIComponent(title) + '&desp=' + encodeURIComponent(content);
                 const req = https.request({
                   hostname: 'sctapi.ftqq.com',
-                  path: `/${SERVERCHAN_KEY}.send`,
+                  path: '/' + SERVERCHAN_KEY + '.send',
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -53,156 +60,122 @@ jobs:
                 req.on('error', () => resolve());
                 req.write(postData);
                 req.end();
-                console.log('📨 微信通知已发送');
+                console.log('微信通知已发送');
               } catch(e) {
-                console.log('📨 通知发送失败:', e.message);
+                console.log('通知发送失败: ' + e.message);
                 resolve();
               }
             });
           }
 
-          // 给每个站点加总超时2分钟
-          function withTimeout(promise, ms, label) {
-            return Promise.race([
-              promise,
-              new Promise((_, reject) =>
-                setTimeout(() => reject(new Error(`超时${ms/1000}秒: ${label}`)), ms)
-              )
-            ]);
-          }
-
           async function checkinSite(browser, site) {
-            console.log(`\n📌 [${site.name}] ${site.username}`);
-            try {
-              const context = await browser.newContext({
-                viewport: { width: 1920, height: 1080 },
-                locale: 'zh-CN',
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                extraHTTPHeaders: { 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' }
-              });
+            console.log('\n[' + site.name + '] ' + site.username);
+            const context = await browser.newContext({
+              viewport: { width: 1920, height: 1080 },
+              locale: 'zh-CN',
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              extraHTTPHeaders: { 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' }
+            });
 
-              const page = await context.newPage();
-              await page.goto(site.url + '/login', { timeout: 60000, waitUntil: 'domcontentloaded' });
-              await page.waitForTimeout(5000);
+            const page = await context.newPage();
+            await page.goto(site.url + '/login', { timeout: 60000, waitUntil: 'domcontentloaded' });
+            await page.waitForTimeout(5000);
 
-              const title = await page.title();
-              if (title.includes('Just a moment')) {
-                console.log('⚠️ Cloudflare 验证中，等待...');
-                await page.waitForTimeout(15000);
-              }
-
-              const emailInput = await page.$('input[type="email"]');
-              const userInput = await page.$('input[placeholder*="邮箱"], input[placeholder*="账号"], input[placeholder*="用户名"], input[name="username"]');
-              const passInput = await page.$('input[type="password"]');
-
-              if (emailInput) await emailInput.fill(site.username);
-              else if (userInput) await userInput.fill(site.username);
-              if (passInput) await passInput.fill(site.password);
-
-              await page.waitForTimeout(1000);
-
-              // 勾选用户协议复选框（兼容标准和semi-checkbox）
-              try {
-                const semiCheckbox = await page.$('.semi-checkbox');
-                if (semiCheckbox) {
-                  await semiCheckbox.click();
-                  console.log('☑️ 已勾选用户协议（semi）');
-                } else {
-                  const checkbox = await page.$('input[type="checkbox"]');
-                  if (checkbox) {
-                    const checked = await checkbox.isChecked();
-                    if (!checked) {
-                      await checkbox.click();
-                      console.log('☑️ 已勾选用户协议');
-                    }
-                  }
-                }
-              } catch(e) {}
-
-              await page.waitForTimeout(1000);
-
-              // 等待登录按钮可点击再点，最多等15秒
-              try {
-                const submitBtn = await withTimeout(
-                  page.waitForSelector('button[type="submit"]:not([disabled])', { timeout: 15000 }),
-                  15000,
-                  '等待登录按钮'
-                );
-                await submitBtn.click();
-                console.log('🔄 点击登录...');
-              } catch(e) {
-                const submitBtn = await page.$('button[type="submit"]');
-                if (submitBtn) await submitBtn.click();
-                console.log('🔄 点击登录（强制）...');
-              }
-
-              await page.waitForTimeout(8000);
-
-              const userInfo = await page.evaluate(() => {
-                try {
-                  const user = localStorage.getItem('user');
-                  return user ? JSON.parse(user) : null;
-                } catch(e) { return null; }
-              });
-
-              if (!userInfo?.id) {
-                console.log(`❌❌❌ [${site.name}] ${site.username} 登录失败`);
-                await context.close();
-                return { name: site.name, username: site.username, ok: false, msg: '登录失败', balance: '' };
-              }
-
-              console.log(`✅ 用户ID: ${userInfo.id}`);
-
-              // 签到
-              const response = await page.evaluate(async (userId) => {
-                try {
-                  const headers = userId ? { 'New-Api-User': String(userId) } : {};
-                  const res = await fetch('/api/user/checkin', { method: 'POST', headers });
-                  return await res.json();
-                } catch(e) { return { error: e.toString() }; }
-              }, userInfo?.id);
-
-              const msg = response.message || response.msg || JSON.stringify(response);
-              const checkinOk = response.success || msg.includes('成功') || msg.includes('已签到');
-
-              if (checkinOk) {
-                console.log(`✅ [${site.name}] ${site.username} 签到: ${msg}`);
-              } else {
-                console.log(`❌❌❌ [${site.name}] ${site.username} 签到失败: ${msg}`);
-              }
-
-              // 签到后查询余额
-              const selfInfo = await page.evaluate(async (userId) => {
-                try {
-                  const headers = userId ? { 'New-Api-User': String(userId) } : {};
-                  const res = await fetch('/api/user/self', { method: 'GET', headers });
-                  return await res.json();
-                } catch(e) { return { error: e.toString() }; }
-              }, userInfo?.id);
-
-              let balanceStr = '';
-              if (selfInfo?.data) {
-                const quota = selfInfo.data.quota ?? selfInfo.data.balance ?? null;
-                const used = selfInfo.data.used_quota ?? null;
-                if (quota !== null) {
-                  const balance = (quota / 500000).toFixed(4);
-                  const usedAmount = used !== null ? (used / 500000).toFixed(4) : '未知';
-                  balanceStr = `$${balance}`;
-                  console.log(`💰 余额: $${balance}  |  历史消耗: $${usedAmount}`);
-                }
-              }
-
-              await context.close();
-              return { name: site.name, username: site.username, ok: checkinOk, msg, balance: balanceStr };
-            } catch(e) {
-              console.log(`❌❌❌ [${site.name}] ${site.username} 异常: ${e.message}`);
-              return { name: site.name, username: site.username, ok: false, msg: e.message, balance: '' };
+            const title = await page.title();
+            if (title.includes('Just a moment')) {
+              console.log('Cloudflare, waiting...');
+              await page.waitForTimeout(15000);
             }
+
+            const emailInput = await page.$('input[type="email"]');
+            const userInput = await page.$('input[placeholder*="邮箱"], input[placeholder*="账号"], input[placeholder*="用户名"], input[name="username"]');
+            const passInput = await page.$('input[type="password"]');
+
+            if (emailInput) await emailInput.fill(site.username);
+            else if (userInput) await userInput.fill(site.username);
+            if (passInput) await passInput.fill(site.password);
+
+            await page.waitForTimeout(1000);
+
+            try {
+              const semiCheckbox = await page.$('.semi-checkbox');
+              if (semiCheckbox) {
+                await semiCheckbox.click();
+                console.log('checked agreement (semi)');
+              } else {
+                const checkbox = await page.$('input[type="checkbox"]');
+                if (checkbox) {
+                  const checked = await checkbox.isChecked();
+                  if (!checked) await checkbox.click();
+                  console.log('checked agreement');
+                }
+              }
+            } catch(e) {}
+
+            await page.waitForTimeout(1000);
+
+            try {
+              const submitBtn = await page.waitForSelector('button[type="submit"]:not([disabled])', { timeout: 15000 });
+              await submitBtn.click();
+              console.log('clicked login');
+            } catch(e) {
+              const submitBtn = await page.$('button[type="submit"]');
+              if (submitBtn) await submitBtn.click();
+              console.log('clicked login (force)');
+            }
+
+            await page.waitForTimeout(8000);
+
+            const userInfo = await page.evaluate(function() {
+              try {
+                var user = localStorage.getItem('user');
+                return user ? JSON.parse(user) : null;
+              } catch(e) { return null; }
+            });
+
+            if (!userInfo || !userInfo.id) {
+              console.log('FAIL login: ' + site.username);
+              await context.close();
+              return { name: site.name, username: site.username, ok: false, msg: 'login failed', balance: '' };
+            }
+
+            console.log('user id: ' + userInfo.id);
+
+            const response = await page.evaluate(function(userId) {
+              var headers = userId ? { 'New-Api-User': String(userId) } : {};
+              return fetch('/api/user/checkin', { method: 'POST', headers: headers })
+                .then(function(r) { return r.json(); })
+                .catch(function(e) { return { error: e.toString() }; });
+            }, userInfo.id);
+
+            const msg = response.message || response.msg || JSON.stringify(response);
+            const checkinOk = response.success || msg.includes('成功') || msg.includes('已签到');
+            console.log((checkinOk ? 'OK' : 'FAIL') + ' checkin: ' + msg);
+
+            const selfInfo = await page.evaluate(function(userId) {
+              var headers = userId ? { 'New-Api-User': String(userId) } : {};
+              return fetch('/api/user/self', { method: 'GET', headers: headers })
+                .then(function(r) { return r.json(); })
+                .catch(function(e) { return { error: e.toString() }; });
+            }, userInfo.id);
+
+            var balanceStr = '';
+            if (selfInfo && selfInfo.data) {
+              var quota = selfInfo.data.quota != null ? selfInfo.data.quota : selfInfo.data.balance;
+              if (quota != null) {
+                var balance = (quota / 500000).toFixed(4);
+                balanceStr = '$' + balance;
+                console.log('balance: $' + balance);
+              }
+            }
+
+            await context.close();
+            return { name: site.name, username: site.username, ok: checkinOk, msg: msg, balance: balanceStr };
           }
 
           async function main() {
-            console.log('🚀 自动签到...');
-            console.log(`⏰ 北京时间 ${new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}`);
+            console.log('Auto Checkin Start');
+            console.log(new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }));
 
             const browser = await chromium.launch({
               headless: true,
@@ -211,54 +184,52 @@ jobs:
 
             const results = [];
             const batchSize = 10;
-            for (let i = 0; i < SITES.length; i += batchSize) {
+            for (var i = 0; i < SITES.length; i += batchSize) {
               const batch = SITES.slice(i, i + batchSize);
               const batchResults = await Promise.all(
-                batch.map(site => withTimeout(
-                  checkinSite(browser, site),
-                  120000,
-                  `${site.name} ${site.username}`
-                ).catch(e => ({
-                  name: site.name,
-                  username: site.username,
-                  ok: false,
-                  msg: e.message,
-                  balance: ''
-                }))
+                batch.map(function(site) {
+                  return withTimeout(checkinSite(browser, site), 120000)
+                    .catch(function(e) {
+                      return { name: site.name, username: site.username, ok: false, msg: e.message, balance: '' };
+                    });
+                })
               );
-              results.push(...batchResults);
+              results.push.apply(results, batchResults);
             }
 
             await browser.close();
 
-            const success = results.filter(r => r.ok).length;
-            const failed = results.filter(r => !r.ok).length;
-            console.log(`\n📊 签到完成: ✅ ${success} 成功, ❌ ${failed} 失败`);
+            const success = results.filter(function(r) { return r.ok; }).length;
+            const failed = results.filter(function(r) { return !r.ok; }).length;
+            console.log('Done: ' + success + ' ok, ' + failed + ' failed');
 
-            const failedList = results.filter(r => !r.ok);
+            const failedList = results.filter(function(r) { return !r.ok; });
             if (failedList.length > 0) {
-              console.log('\n❌ 失败账号：');
-              failedList.forEach(r => console.log(`  - [${r.name}] ${r.username}: ${r.msg}`));
-            }
-
-            // 发送微信通知
-            const time = new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'});
-            let content = `## ⏰ ${time}\n\n| 站点 | 账号 | 签到 | 余额 |\n|---|---|---|---|\n`;
-            for (const r of results) {
-              const icon = r.ok ? '✅' : '❌';
-              content += `| ${r.name} | ${r.username} | ${icon} ${r.msg} | ${r.balance} |\n`;
-            }
-            content += `\n**✅ ${success} 成功 / ❌ ${failed} 失败**`;
-
-            if (failedList.length > 0) {
-              content += `\n\n### ❌ 失败账号\n`;
-              failedList.forEach(r => {
-                content += `- [${r.name}] ${r.username}: ${r.msg}\n`;
+              console.log('Failed accounts:');
+              failedList.forEach(function(r) {
+                console.log('  [' + r.name + '] ' + r.username + ': ' + r.msg);
               });
             }
 
-            await sendNotification(`🎯 签到报告 ${success}成功 ${failed}失败`, content);
+            const time = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+            var content = '## ' + time + '\n\n| 站点 | 账号 | 签到 | 余额 |\n|---|---|---|---|\n';
+            results.forEach(function(r) {
+              var icon = r.ok ? 'OK' : 'FAIL';
+              content += '| ' + r.name + ' | ' + r.username + ' | ' + icon + ' ' + r.msg + ' | ' + r.balance + ' |\n';
+            });
+            content += '\nOK: ' + success + ' / FAIL: ' + failed;
+
+            if (failedList.length > 0) {
+              content += '\n\nFailed:\n';
+              failedList.forEach(function(r) {
+                content += '- [' + r.name + '] ' + r.username + ': ' + r.msg + '\n';
+              });
+            }
+
+            const notifTitle = 'checkin ' + success + ' ok ' + failed + ' fail';
+            await sendNotification(notifTitle, content);
           }
 
           main().catch(console.error);
-          EOF
+          SCRIPT
+          node /tmp/checkin.js
