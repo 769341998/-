@@ -11,6 +11,7 @@ on:
 jobs:
   checkin:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -139,7 +140,7 @@ jobs:
               });
 
               if (!userInfo?.id) {
-                console.log(`❌❌❌ [${site.name}] ${site.username} 登录失败，未获取到用户信息`);
+                console.log(`❌❌❌ [${site.name}] ${site.username} 登录失败`);
                 await context.close();
                 return { name: site.name, username: site.username, ok: false, msg: '登录失败', balance: '' };
               }
@@ -216,7 +217,6 @@ jobs:
             const failed = results.filter(r => !r.ok).length;
             console.log(`\n📊 签到完成: ✅ ${success} 成功, ❌ ${failed} 失败`);
 
-            // 失败列表单独打印
             const failedList = results.filter(r => !r.ok);
             if (failedList.length > 0) {
               console.log('\n❌ 失败账号：');
