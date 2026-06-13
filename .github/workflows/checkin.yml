@@ -2,10 +2,10 @@ name: Auto Checkin
 
 on:
   schedule:
-    - cron: '51 5 * * *'
-    - cron: '53 7 * * *'
-    - cron: '55 10 * * *'
-    - cron: '55 12 * * *'
+    - cron: '51 1 * * *'
+    - cron: '53 3 * * *'
+    - cron: '55 5 * * *'
+    - cron: '55 7 * * *'
   workflow_dispatch:
 
 jobs:
@@ -170,12 +170,9 @@ jobs:
               let balanceStr = '';
               if (selfInfo?.data) {
                 const quota = selfInfo.data.quota ?? selfInfo.data.balance ?? null;
-                const used = selfInfo.data.used_quota ?? null;
                 if (quota !== null) {
-                  const balance = (quota / 500000).toFixed(4);
-                  const usedAmount = used !== null ? (used / 500000).toFixed(4) : '未知';
-                  balanceStr = `$${balance}`;
-                  console.log(`💰 余额: $${balance}  |  历史消耗: $${usedAmount}`);
+                  balanceStr = quota.toFixed(2);
+                  console.log(`💰 余额: ${balanceStr}`);
                 }
               }
 
