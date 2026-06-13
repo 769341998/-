@@ -172,9 +172,10 @@ jobs:
                 const quota = selfInfo.data.quota ?? selfInfo.data.balance ?? null;
                 if (quota !== null) {
                   const rate = site.rate || 500000;
+                  const unit = site.unit || '$';
                   const balance = (quota / rate).toFixed(4);
-                  balanceStr = `$${balance}`;
-                  console.log(`💰 余额: $${balance}`);
+                  balanceStr = `${unit}${balance}`;
+                  console.log(`💰 余额: ${balanceStr}`);
                 }
               }
 
