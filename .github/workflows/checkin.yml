@@ -2,10 +2,10 @@ name: Auto Checkin
 
 on:
   schedule:
-    - cron: '51 23 * * *'
-    - cron: '53 1 * * *'
-    - cron: '55 3 * * *'
-    - cron: '55 5 * * *'
+    - cron: '51 5 * * *'
+    - cron: '53 7 * * *'
+    - cron: '55 10 * * *'
+    - cron: '55 12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Setup Node.js
-        uses: actions/setup-node@v4.4.0
+        uses: actions/setup-node@v4
         with:
           node-version: '24'
 
@@ -137,6 +137,7 @@ jobs:
 
               console.log(`✅ 用户ID: ${userInfo.id}`);
 
+              // 签到
               const response = await page.evaluate(async (userId) => {
                 try {
                   const headers = userId ? { 'New-Api-User': String(userId) } : {};
@@ -154,6 +155,10 @@ jobs:
                 console.log(`❌❌❌ [${site.name}] ${site.username} 签到失败: ${msg}`);
               }
 
+              // 等待3秒让服务器更新余额
+              await page.waitForTimeout(3000);
+
+              // 签到后查询余额
               const selfInfo = await page.evaluate(async (userId) => {
                 try {
                   const headers = userId ? { 'New-Api-User': String(userId) } : {};
