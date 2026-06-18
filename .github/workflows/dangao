@@ -1,0 +1,61 @@
+name: 蛋糕签到
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # 北京时间每天早上9点
+  workflow_dispatch:
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 执行签到
+        env:
+          DANGAO_ACCOUNTS: ${{ secrets.DANGAO_ACCOUNTS }}
+        run: |
+          python3 << 'EOF'
+          import requests, os, json
+
+          ACCOUNTS = json.loads(os.environ['DANGAO_ACCOUNTS'])
+          BASE_URL = "https://dangao.iisbo.com"
+          HEADERS = {
+              "Content-Type": "application/json",
+              "Accept": "application/json, text/plain, */*",
+              "Origin": BASE_URL,
+              "Referer": f"{BASE_URL}/novelai",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36",
+          }
+
+          def login(email, password):
+              r = requests.post(f"{BASE_URL}/api/login", json={"email": email, "password": password, "remember_me": 30}, headers=HEADERS)
+              return r.json().get("token")
+
+          def checkin(token):
+              h = {**HEADERS, "Authorization": f"Bearer {token}"}
+              return requests.post(f"{BASE_URL}/api/user/checkin", headers=h).json()
+
+          def profile(token):
+              h = {**HEADERS, "Authorization": f"Bearer {token}"}
+              return requests.get(f"{BASE_URL}/api/user/profile", headers=h).json()
+
+          print(f"共 {len(ACCOUNTS)} 个账号")
+          print("="*50)
+          total = 0
+          for i, acc in enumerate(ACCOUNTS, 1):
+              try:
+                  token = login(acc['email'], acc['password'])
+                  if not token:
+                      print(f"[{i}] {acc['email']} - 登录失败")
+                      continue
+                  result = checkin(token)
+                  info = profile(token).get('user', {})
+                  points = info.get('points', 0)
+                  total += points
+                  err = result.get('error', '')
+                  status = f"已签到" if err else "签到成功 +10"
+                  print(f"[{i}] {info.get('username')} ({acc['email']}) - {status} - 余额: {points}点")
+              except Exception as e:
+                  print(f"[{i}] {acc['email']} - 出错: {e}")
+          print("="*50)
+          print(f"总余额: {total} 点")
+          EOF
