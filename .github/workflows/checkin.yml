@@ -196,7 +196,6 @@ jobs:
               });
 
               const page = await context.newPage();
-              // 新版登录页路径为 /sign-in
               await page.goto(site.url + '/sign-in', { timeout: 60000, waitUntil: 'domcontentloaded' });
               await page.waitForTimeout(5000);
 
@@ -217,40 +216,115 @@ jobs:
 
               await page.waitForTimeout(1000);
 
-              // 勾选协议
-              try {
-                const semiCheckbox = await page.$('.semi-checkbox');
-                if (semiCheckbox) {
-                  await semiCheckbox.click();
-                  console.log('☑️ 已勾选用户协议（semi）');
-                } else {
-                  const checkbox = await page.$('input[type="checkbox"]');
-                  if (checkbox) {
-                    const checked = await checkbox.isChecked();
-                    if (!checked) {
-                      await checkbox.click();
-                      console.log('☑️ 已勾选用户协议');
-                    }
+              // ===== 强力多策略勾选协议 =====
+              // 哈基米等新版站点协议框可能是自定义组件，需要多策略兜底
+              const checkboxClicked = await page.evaluate(() => {
+                // 策略1: 标准 input[type="checkbox"]
+                const inputs = document.querySelectorAll('input[type="checkbox"]');
+                for (const cb of inputs) {
+                  if (!cb.checked) {
+                    cb.click();
+                    // 触发 React/Vue 的合成事件
+                    cb.dispatchEvent(new Event('change', { bubbles: true }));
+                    cb.dispatchEvent(new Event('input', { bubbles: true }));
                   }
                 }
-              } catch(e) {}
+                if (inputs.length > 0) return 'input-checkbox';
+
+                // 策略2: semi-checkbox 组件 (Semi UI)
+                const semiCbs = document.querySelectorAll('.semi-checkbox, .semi-checkbox-inner, [class*="semi-checkbox"]');
+                if (semiCbs.length > 0) {
+                  semiCbs[0].click();
+                  return 'semi-checkbox';
+                }
+
+                // 策略3: role="checkbox" 的任意元素
+                const roleCbs = document.querySelectorAll('[role="checkbox"]');
+                if (roleCbs.length > 0) {
+                  roleCbs[0].click();
+                  roleCbs[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                  return 'role-checkbox';
+                }
+
+                // 策略4: 含"协议"或"用户"文字的可点击区域（label/span/div）
+                const allEls = document.querySelectorAll('label, span, div');
+                for (const el of allEls) {
+                  if ((el.textContent.includes('协议') || el.textContent.includes('用户') || el.textContent.includes('同意'))
+                      && el.offsetWidth > 0 && el.offsetWidth < 300) {
+                    el.click();
+                    return 'text-label';
+                  }
+                }
+
+                return 'none';
+              });
+              console.log(`☑️ 协议勾选策略: ${checkboxClicked}`);
+
+              // 额外等待一下，让 React 状态更新
+              await page.waitForTimeout(1500);
+
+              // 如果上面用 JS 点击不够，再用 Playwright 原生 click 兜底
+              if (checkboxClicked === 'none' || checkboxClicked === 'input-checkbox') {
+                try {
+                  // 尝试点击包含协议文字的 label 或其前面的圆圈
+                  const agreeLabel = await page.$('label:has-text("协议"), label:has-text("同意"), label:has-text("用户")');
+                  if (agreeLabel) {
+                    await agreeLabel.click({ force: true });
+                    console.log('☑️ 已点击协议 label（Playwright）');
+                  }
+                } catch(e) {}
+              }
 
               await page.waitForTimeout(1000);
 
-              // 点击登录
+              // ===== 点击登录按钮，多策略兜底 =====
+              let loginClicked = false;
+
+              // 策略1: 等待非 disabled 的 submit 按钮
               try {
-                const submitBtn = await page.waitForSelector('button[type="submit"]:not([disabled])', { timeout: 15000 });
+                const submitBtn = await page.waitForSelector('button[type="submit"]:not([disabled])', { timeout: 8000 });
                 await submitBtn.click();
-                console.log('🔄 点击登录...');
-              } catch(e) {
-                const submitBtn = await page.$('button[type="submit"]');
-                if (submitBtn) await submitBtn.click();
-                console.log('🔄 点击登录（强制）...');
+                console.log('🔄 点击登录（submit 非禁用）...');
+                loginClicked = true;
+              } catch(e) {}
+
+              // 策略2: 强制点击 submit 按钮（即使 disabled）
+              if (!loginClicked) {
+                try {
+                  const submitBtn = await page.$('button[type="submit"]');
+                  if (submitBtn) {
+                    await submitBtn.click({ force: true });
+                    console.log('🔄 点击登录（submit 强制）...');
+                    loginClicked = true;
+                  }
+                } catch(e) {}
+              }
+
+              // 策略3: 通过文字找按钮
+              if (!loginClicked) {
+                try {
+                  const loginBtn = await page.$('button:has-text("登录"), button:has-text("继续"), button:has-text("Login")');
+                  if (loginBtn) {
+                    await loginBtn.click({ force: true });
+                    console.log('🔄 点击登录（文字按钮）...');
+                    loginClicked = true;
+                  }
+                } catch(e) {}
+              }
+
+              // 策略4: JS 直接提交表单
+              if (!loginClicked) {
+                await page.evaluate(() => {
+                  const btn = document.querySelector('button[type="submit"]') ||
+                              document.querySelector('button');
+                  if (btn) btn.click();
+                });
+                console.log('🔄 点击登录（JS click）...');
               }
 
               await page.waitForTimeout(8000);
 
-              // 新版通过 API 获取当前用户信息（Cookie 自动携带，无需手动读 localStorage）
+              // 新版通过 API 获取当前用户信息（Cookie 自动携带）
               const selfInfo = await page.evaluate(async () => {
                 try {
                   const res = await fetch('/api/user/self', { method: 'GET' });
@@ -259,16 +333,41 @@ jobs:
               });
 
               if (!selfInfo?.data?.id) {
-                console.log(`❌❌❌ [${site.name}] ${site.username} 登录失败，未获取到用户信息`);
+                // 兜底：尝试从 localStorage 读取（部分站点混用）
+                const userFromStorage = await page.evaluate(() => {
+                  try {
+                    const u = localStorage.getItem('user');
+                    return u ? JSON.parse(u) : null;
+                  } catch(e) { return null; }
+                });
+                if (!userFromStorage?.id) {
+                  console.log(`❌❌❌ [${site.name}] ${site.username} 登录失败，未获取到用户信息`);
+                  console.log(`  selfInfo: ${JSON.stringify(selfInfo)}`);
+                  await context.close();
+                  return { name: site.name, username: site.username, ok: false, msg: '登录失败', balance: '' };
+                }
+                // 如果 localStorage 有数据，转交旧逻辑处理
+                console.log(`✅ 用户ID（localStorage 兜底）: ${userFromStorage.id}`);
+                const response = await page.evaluate(async (userId) => {
+                  try {
+                    const headers = userId ? { 'New-Api-User': String(userId) } : {};
+                    const res = await fetch('/api/user/checkin', { method: 'POST', headers });
+                    return await res.json();
+                  } catch(e) { return { error: e.toString() }; }
+                }, userFromStorage.id);
+                const msg = response.message || response.msg || JSON.stringify(response);
+                const checkinOk = response.success || msg.includes('成功') || msg.includes('已签到');
+                if (checkinOk) console.log(`✅ [${site.name}] ${site.username} 签到: ${msg}`);
+                else console.log(`❌❌❌ [${site.name}] ${site.username} 签到失败: ${msg}`);
                 await context.close();
-                return { name: site.name, username: site.username, ok: false, msg: '登录失败', balance: '' };
+                return { name: site.name, username: site.username, ok: checkinOk, msg, balance: '' };
               }
 
               const userId = selfInfo.data.id;
               console.log(`✅ 用户ID: ${userId}`);
 
-              // 新版签到接口为 /api/user/sign_in
-              const response = await page.evaluate(async (uid) => {
+              // 新版签到接口为 /api/user/sign_in，同时兜底 /api/user/checkin
+              let response = await page.evaluate(async (uid) => {
                 try {
                   const res = await fetch('/api/user/sign_in', {
                     method: 'POST',
@@ -277,6 +376,18 @@ jobs:
                   return await res.json();
                 } catch(e) { return { error: e.toString() }; }
               }, userId);
+
+              // 如果 sign_in 不存在，尝试 checkin
+              if (response.error || response.message === 'not found' || response.status === 404) {
+                console.log('⚠️ sign_in 接口无效，尝试 checkin 接口...');
+                response = await page.evaluate(async (uid) => {
+                  try {
+                    const headers = uid ? { 'New-Api-User': String(uid) } : {};
+                    const res = await fetch('/api/user/checkin', { method: 'POST', headers });
+                    return await res.json();
+                  } catch(e) { return { error: e.toString() }; }
+                }, userId);
+              }
 
               const msg = response.message || response.msg || JSON.stringify(response);
               const checkinOk = response.success || msg.includes('成功') || msg.includes('已签到') || msg.includes('sign');
@@ -287,7 +398,6 @@ jobs:
                 console.log(`❌❌❌ [${site.name}] ${site.username} 签到失败: ${msg}`);
               }
 
-              // 签到后等待余额更新，再次查询
               await page.waitForTimeout(3000);
 
               const selfInfoAfter = await page.evaluate(async (uid) => {
@@ -333,7 +443,6 @@ jobs:
             const batchSize = 10;
             for (let i = 0; i < SITES.length; i += batchSize) {
               const batch = SITES.slice(i, i + batchSize);
-              // 根据 style 字段决定调用哪个签到函数
               const batchResults = await Promise.all(
                 batch.map(site =>
                   site.style === 'new' ? checkinSiteNewStyle(browser, site) : checkinSite(browser, site)
