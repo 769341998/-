@@ -380,29 +380,21 @@ jobs:
                 if (fbSelf?.data) {
                   const d = fbSelf.data;
                   if (site.currency === 'CNY') {
-                    const recharge = (d.quota ?? 0) / 10;
-                    const gift = (d.aff_quota ?? d.gift_amount ?? d.group_quota ?? 0) / 10;
+                    const debugKeys = Object.keys(d).filter(k => k.toLowerCase().includes('quota') || k.toLowerCase().includes('balance') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('gift') || k.toLowerCase().includes('aff') || k.toLowerCase().includes('import'));
+                    console.log(`🔍 [DEBUG] quota相关字段: ${debugKeys.map(k => `${k}=${d[k]}`).join(', ')}`);
+                    const rate = site.rate || 500000;
+                    const recharge = (d.quota ?? 0) / rate;
+                    const gift = (d.aff_quota ?? d.gift_amount ?? d.group_quota ?? d.import_quota ?? 0) / rate;
                     const total = recharge + gift;
                     fbBalance = gift > 0
-                      ? `¥${total.toFixed(2)}（充值¥${recharge.toFixed(2)}+积分¥${gift.toFixed(2)}）`
+                      ? `¥${total.toFixed(2)}（充值¥${recharge.toFixed(2)}+导入¥${gift.toFixed(2)}）`
                       : `¥${recharge.toFixed(2)}`;
                   } else if (site.rate) {
                     const quota = d.quota ?? d.balance ?? null;
                     if (quota !== null) fbBalance = `${site.unit || '$'}${(quota / site.rate).toFixed(4)}`;
                   } else {
                     const quota = d.quota ?? d.balance ?? null;
-                    if (quota !== null) {
-                      if (quota > 1000000) {
-                        const recharge = quota / 10;
-                        const gift = (d.aff_quota ?? d.gift_amount ?? d.group_quota ?? 0) / 10;
-                        const total = recharge + gift;
-                        fbBalance = gift > 0
-                          ? `¥${total.toFixed(2)}（充值¥${recharge.toFixed(2)}+积分¥${gift.toFixed(2)}）`
-                          : `¥${recharge.toFixed(2)}`;
-                      } else {
-                        fbBalance = `$${(quota / 500000).toFixed(4)}`;
-                      }
-                    }
+                    if (quota !== null) fbBalance = `$${(quota / 500000).toFixed(4)}`;
                   }
                   if (fbBalance) console.log(`💰 余额: ${fbBalance}`);
                 }
@@ -464,40 +456,32 @@ jobs:
                 // 同时区分充值额度(quota)和积分/赠送额度(aff_quota / gift_amount / group_quota)
                 // 旧版站（美元）：quota 除以 rate(500000) 得到美元
                 if (site.currency === 'CNY') {
-                  // 强制人民币模式：直接按元显示，同时拆分充值+积分
-                  const recharge = (d.quota ?? 0) / 10;          // 充值额度（元）
-                  const gift     = (d.aff_quota ?? d.gift_amount ?? d.group_quota ?? 0) / 10; // 积分/赠送额度（元）
+                  // 调试：打印所有 quota 相关字段的原始值，方便确认字段名
+                  const debugKeys = Object.keys(d).filter(k => k.toLowerCase().includes('quota') || k.toLowerCase().includes('balance') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('gift') || k.toLowerCase().includes('aff') || k.toLowerCase().includes('import'));
+                  console.log(`🔍 [DEBUG] quota相关字段: ${debugKeys.map(k => `${k}=${d[k]}`).join(', ')}`);
+                  // 人民币模式：quota 单位与美元站相同（500000单位=1元），显示为¥
+                  const rate = site.rate || 500000;
+                  const recharge = (d.quota ?? 0) / rate;
+                  const gift     = (d.aff_quota ?? d.gift_amount ?? d.group_quota ?? d.import_quota ?? 0) / rate;
                   const total    = recharge + gift;
-                  balanceStr = `¥${total.toFixed(2)}（充值¥${recharge.toFixed(2)}+积分¥${gift.toFixed(2)}）`;
+                  balanceStr = gift > 0
+                    ? `¥${total.toFixed(2)}（充值¥${recharge.toFixed(2)}+导入¥${gift.toFixed(2)}）`
+                    : `¥${recharge.toFixed(2)}`;
                   console.log(`💰 余额: ${balanceStr}`);
                 } else if (site.rate) {
-                  // 明确指定了换算率：按旧逻辑换算
+                  // 明确指定换算率
                   const quota = d.quota ?? d.balance ?? null;
                   if (quota !== null) {
                     const unit = site.unit || '$';
-                    const balance = (quota / site.rate).toFixed(4);
-                    balanceStr = `${unit}${balance}`;
+                    balanceStr = `${unit}${(quota / site.rate).toFixed(4)}`;
                     console.log(`💰 余额: ${balanceStr}`);
                   }
                 } else {
-                  // 自动探测：如果 quota 数值超大（>1000000），大概率是分为单位的人民币
+                  // 自动探测（无配置时）：统一用 500000 换算，显示美元
                   const quota = d.quota ?? d.balance ?? null;
                   if (quota !== null) {
-                    if (quota > 1000000) {
-                      // 按人民币元处理，同时尝试读积分字段
-                      const recharge = quota / 10;
-                      const gift = (d.aff_quota ?? d.gift_amount ?? d.group_quota ?? 0) / 10;
-                      const total = recharge + gift;
-                      balanceStr = gift > 0
-                        ? `¥${total.toFixed(2)}（充值¥${recharge.toFixed(2)}+积分¥${gift.toFixed(2)}）`
-                        : `¥${recharge.toFixed(2)}`;
-                      console.log(`💰 余额: ${balanceStr}`);
-                    } else {
-                      // 按美元处理（默认 rate=500000）
-                      const balance = (quota / 500000).toFixed(4);
-                      balanceStr = `$${balance}`;
-                      console.log(`💰 余额: ${balanceStr}`);
-                    }
+                    balanceStr = `$${(quota / 500000).toFixed(4)}`;
+                    console.log(`💰 余额: ${balanceStr}`);
                   }
                 }
               }
