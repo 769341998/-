@@ -348,19 +348,66 @@ jobs:
                 }
                 // 如果 localStorage 有数据，转交旧逻辑处理
                 console.log(`✅ 用户ID（localStorage 兜底）: ${userFromStorage.id}`);
-                const response = await page.evaluate(async (userId) => {
+                const fbUserId = userFromStorage.id;
+                // 先尝试 sign_in，兜底 checkin
+                let fbResp = await page.evaluate(async (uid) => {
                   try {
-                    const headers = userId ? { 'New-Api-User': String(userId) } : {};
-                    const res = await fetch('/api/user/checkin', { method: 'POST', headers });
+                    const res = await fetch('/api/user/sign_in', { method: 'POST', headers: { 'New-Api-User': String(uid) } });
                     return await res.json();
                   } catch(e) { return { error: e.toString() }; }
-                }, userFromStorage.id);
-                const msg = response.message || response.msg || JSON.stringify(response);
-                const checkinOk = response.success || msg.includes('成功') || msg.includes('已签到');
-                if (checkinOk) console.log(`✅ [${site.name}] ${site.username} 签到: ${msg}`);
-                else console.log(`❌❌❌ [${site.name}] ${site.username} 签到失败: ${msg}`);
+                }, fbUserId);
+                if (fbResp.error || fbResp.message === 'not found' || fbResp.status === 404) {
+                  fbResp = await page.evaluate(async (uid) => {
+                    try {
+                      const res = await fetch('/api/user/checkin', { method: 'POST', headers: { 'New-Api-User': String(uid) } });
+                      return await res.json();
+                    } catch(e) { return { error: e.toString() }; }
+                  }, fbUserId);
+                }
+                const fbMsg = fbResp.message || fbResp.msg || JSON.stringify(fbResp);
+                const fbOk = fbResp.success || fbMsg.includes('成功') || fbMsg.includes('已签到') || fbMsg.includes('sign');
+                if (fbOk) console.log(`✅ [${site.name}] ${site.username} 签到: ${fbMsg}`);
+                else console.log(`❌❌❌ [${site.name}] ${site.username} 签到失败: ${fbMsg}`);
+                // 查余额
+                await page.waitForTimeout(2000);
+                const fbSelf = await page.evaluate(async (uid) => {
+                  try {
+                    const res = await fetch('/api/user/self', { method: 'GET', headers: { 'New-Api-User': String(uid) } });
+                    return await res.json();
+                  } catch(e) { return { error: e.toString() }; }
+                }, fbUserId);
+                let fbBalance = '';
+                if (fbSelf?.data) {
+                  const d = fbSelf.data;
+                  if (site.currency === 'CNY') {
+                    const recharge = (d.quota ?? 0) / 10;
+                    const gift = (d.aff_quota ?? d.gift_amount ?? d.group_quota ?? 0) / 10;
+                    const total = recharge + gift;
+                    fbBalance = gift > 0
+                      ? `¥${total.toFixed(2)}（充值¥${recharge.toFixed(2)}+积分¥${gift.toFixed(2)}）`
+                      : `¥${recharge.toFixed(2)}`;
+                  } else if (site.rate) {
+                    const quota = d.quota ?? d.balance ?? null;
+                    if (quota !== null) fbBalance = `${site.unit || '$'}${(quota / site.rate).toFixed(4)}`;
+                  } else {
+                    const quota = d.quota ?? d.balance ?? null;
+                    if (quota !== null) {
+                      if (quota > 1000000) {
+                        const recharge = quota / 10;
+                        const gift = (d.aff_quota ?? d.gift_amount ?? d.group_quota ?? 0) / 10;
+                        const total = recharge + gift;
+                        fbBalance = gift > 0
+                          ? `¥${total.toFixed(2)}（充值¥${recharge.toFixed(2)}+积分¥${gift.toFixed(2)}）`
+                          : `¥${recharge.toFixed(2)}`;
+                      } else {
+                        fbBalance = `$${(quota / 500000).toFixed(4)}`;
+                      }
+                    }
+                  }
+                  if (fbBalance) console.log(`💰 余额: ${fbBalance}`);
+                }
                 await context.close();
-                return { name: site.name, username: site.username, ok: checkinOk, msg, balance: '' };
+                return { name: site.name, username: site.username, ok: fbOk, msg: fbMsg, balance: fbBalance };
               }
 
               const userId = selfInfo.data.id;
